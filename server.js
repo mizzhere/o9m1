@@ -1,9 +1,8 @@
 /*
     FILE: server.js (Server-Side)
     UPDATE:
-    - Áp dụng đầy đủ luật di chuyển phức tạp từ bản gốc.
-    - Thêm các hiệu ứng đặc biệt cho lượt sau (Chặn Top 1, Thưởng Đáy Bảng, etc.).
-    - Quyền "Loại Bỏ GM" sẽ loại bỏ tất cả các lá bài của GM.
+    - Thêm logic để quản lý và phát danh sách phòng (sảnh chờ).
+    - Gửi danh sách phòng được cập nhật mỗi khi có người chơi tạo/vào/rời phòng.
 */
 const express = require('express');
 const http = require('http');
@@ -30,6 +29,16 @@ const gameRooms = {};
 const sleep = ms => new Promise(res => setTimeout(res, ms));
 const translateColor = (c) => ({ R: 'Đỏ', G: 'Xanh', Y: 'Vàng', W: 'Trắng' }[c] || '?');
 const getColorClass = (c) => ({ R: 'red', G: 'green', Y: 'yellow' }[c] || 'gray');
+
+// --- NEW LOBBY FUNCTION ---
+function getLobbyInfo() {
+    return Object.values(gameRooms).map(room => ({
+        roomId: room.roomId,
+        playerCount: room.players.filter(p => p.isConnected).length,
+        maxPlayers: NUM_PLAYERS_REQUIRED,
+        gamePhase: room.gamePhase,
+    }));
+}
 
 // --- GAME STATE MANAGEMENT ---
 function createNewGameState(roomId) {
@@ -74,18 +83,19 @@ function handlePlayerLeave(socket) {
             player.socketId = null; 
             socket.leave(room.roomId);
             logAndEmit(room.roomId, 'Rời phòng', `<b>${player.name}</b> đã rời phòng.`, { tagBg: 'bg-red-500' });
+            
+            // Broadcast updated room list to everyone
+            io.emit('updateRoomList', getLobbyInfo());
         }
     }
 }
 
-// --- CORE GAME LOGIC ---
-
+// --- CORE GAME LOGIC (Functions remain the same) ---
 async function startTurn(roomId) {
     const state = gameRooms[roomId];
     if (!state || state.gamePhase === 'GAMEOVER') return;
     
-    // Reset visuals and choices for the new turn
-    state.movementVisuals = null; // Clear old movement visuals
+    state.movementVisuals = null;
     
     state.gamePhase = 'CHOOSING';
     state.isResolvingMoves = false;
@@ -130,7 +140,7 @@ async function resolveTurn(roomId) {
         logAndEmit(roomId, 'Vô hiệu', 'Thẻ Trắng bị vô hiệu, phải đổi màu!', { tagBg: 'bg-red-500' });
         await sleep(800);
         for (const p of whiteCardUsers) { io.to(p.socketId).emit('forceReselect'); }
-        state.isResolvingMoves = false; // Allow reselect action
+        state.isResolvingMoves = false;
         return; 
     } else if (whiteCardUsers.length > 0) {
         const firstGmChoice = state.gmChoices[0];
@@ -147,7 +157,7 @@ async function proceedWithResolution(roomId) {
     const state = gameRooms[roomId];
     if(!state) return;
     state.isResolvingMoves = true;
-    state.gamePhase = 'REVEAL'; // Ensure phase is correct
+    state.gamePhase = 'REVEAL';
 
     io.to(roomId).emit('showChoices', state.players);
     await sleep(1000);
@@ -191,7 +201,6 @@ async function proceedWithResolution(roomId) {
     }
 }
 
-// --- FULL MOVEMENT LOGIC ---
 async function moveCars(roomId) {
     const state = gameRooms[roomId];
     if(!state) return;
@@ -262,7 +271,6 @@ async function moveCars(roomId) {
         }
     }
     
-    logAndEmit(roomId, `Kết quả`, `Cập nhật vị trí...`, {tagBg: 'bg-blue-500'});
     const movementVisuals = {};
     activePlayers.forEach(p => {
         const move = movements.get(p.id) || 0;
@@ -272,9 +280,9 @@ async function moveCars(roomId) {
         }
     });
     
-    state.movementVisuals = movementVisuals; // Store visuals to be cleared next turn
+    state.movementVisuals = movementVisuals;
     io.to(roomId).emit('visualizeMovements', movementVisuals);
-    io.to(roomId).emit('gameStateUpdate', state);
+    logAndEmit(roomId, `Kết quả`, `Cập nhật vị trí...`, {tagBg: 'bg-blue-500'});
     await sleep(1500);
 
     const canTriggerRedLight = state.priorityColor === 'R' && !state.players.some(p=>p.isFinished) && state.turn <= MIN_TURNS;
@@ -355,6 +363,10 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
+    console.log(`User connected: ${socket.id}, Name: ${socket.name}`);
+    // Send the current list of rooms to the newly connected client
+    socket.emit('updateRoomList', getLobbyInfo());
+
     socket.on('createRoom', () => {
         let roomId;
         do { roomId = Math.random().toString(36).substring(2, 7).toUpperCase(); } while (gameRooms[roomId]);
@@ -365,6 +377,9 @@ io.on('connection', (socket) => {
         player.name = socket.name;
         socket.join(roomId);
         socket.emit('roomJoined', { roomId, gameState: gameRooms[roomId] });
+        
+        // Broadcast the new room list to everyone
+        io.emit('updateRoomList', getLobbyInfo());
     });
 
     socket.on('joinRoom', (roomId) => {
@@ -389,6 +404,10 @@ io.on('connection', (socket) => {
         socket.join(roomId);
         socket.emit('roomJoined', { roomId, gameState: room });
         logAndEmit(roomId, 'Tham gia', `<b>${socket.name}</b> đã vào phòng.`, {tagBg: 'bg-blue-600'});
+        
+        // Broadcast updated room list to everyone
+        io.emit('updateRoomList', getLobbyInfo());
+
         if (room.players.filter(p => p.isConnected).length === NUM_PLAYERS_REQUIRED) {
             startTurn(roomId);
         }
