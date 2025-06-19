@@ -1,4 +1,10 @@
 <!DOCTYPE html>
+<!-- 
+    FILE: index.html (Client-Side)
+    UPDATE: 
+    - Thêm cơ chế đăng nhập bằng userId lưu trong localStorage.
+    - Giao diện sảnh chờ thay đổi dựa trên trạng thái đăng nhập.
+-->
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
@@ -98,9 +104,10 @@
     <div id="lobby-screen">
         <div class="lobby-box">
             <h1 class="text-4xl font-bold text-center text-amber-400 tracking-wider uppercase mb-2" style="text-shadow: 0 0 10px rgba(251, 191, 36, 0.5);">Đua Xe Online</h1>
-            <p class="text-slate-400 mb-6">Nơi những cuộc đua nghẹt thở bắt đầu</p>
+            <p id="welcome-message" class="text-slate-400 mb-6">Nơi những cuộc đua nghẹt thở bắt đầu</p>
 
             <div class="grid grid-cols-2 gap-6">
+                <!-- Left Column: Room List -->
                 <div class="text-left">
                     <h3 class="text-lg font-bold text-slate-200 mb-3 border-b border-slate-700 pb-2">Sảnh Chờ</h3>
                     <div id="room-list" class="space-y-2 max-h-48 overflow-y-auto pr-2">
@@ -108,12 +115,18 @@
                     </div>
                 </div>
 
+                <!-- Right Column: Actions -->
                 <div class="flex flex-col gap-4 text-left">
-                     <div>
+                     <!-- Login Form -->
+                     <div id="login-form">
                         <label for="player-name-input" class="block mb-1 text-sm font-medium text-slate-300">Tên tay đua</label>
-                        <input type="text" id="player-name-input" placeholder="Nhập tên để vào chơi" class="lobby-input w-full" maxlength="15">
-                    </div>
-                    <button id="create-room-btn" class="lobby-btn create w-full py-3 mt-2">Tạo Phòng Mới</button>
+                        <div class="flex gap-2">
+                            <input type="text" id="player-name-input" placeholder="Nhập tên để vào chơi" class="lobby-input w-full" maxlength="15">
+                            <button id="login-btn" class="lobby-btn create flex-shrink-0 px-6">Lưu</button>
+                        </div>
+                     </div>
+
+                    <button id="create-room-btn" class="lobby-btn create w-full py-3">Tạo Phòng Mới</button>
                     <div class="flex items-center gap-3">
                         <hr class="flex-grow border-slate-600"><span class="text-slate-500 font-bold">HOẶC</span><hr class="flex-grow border-slate-600">
                     </div>
@@ -187,6 +200,7 @@
         </div>
     </div>
     
+    <!-- MODALS -->
     <div id="game-over-modal" class="modal-overlay hidden"><div class="modal-content max-w-lg w-full"><h2 class="text-3xl font-bold mb-4 text-amber-400">TRÒ CHƠI KẾT THÚC</h2><div id="modal-ranking" class="space-y-1"></div><button id="back-to-lobby-btn" class="mt-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg">Về Sảnh Chờ</button></div></div>
     <div id="reselect-modal" class="modal-overlay hidden"><div class="modal-content max-w-md w-full"><h2 class="text-2xl font-bold mb-2 text-red-500">Thẻ Trắng Vô Hiệu!</h2><p class="text-slate-300 mb-6">Bạn phải chọn một màu khác thay thế.</p><div id="reselect-options" class="flex justify-center gap-4"><button data-color="R" class="card-btn py-2 px-3 bg-red-500 text-white w-24 h-20">ĐỎ</button><button data-color="G" class="card-btn py-2 px-3 bg-green-500 text-white w-24 h-20">XANH</button><button data-color="Y" class="card-btn py-2 px-3 bg-yellow-400 text-slate-800 w-24 h-20">VÀNG</button></div></div></div>
     <div id="remove-gm-modal" class="modal-overlay hidden"><div class="modal-content max-w-sm w-full"><h2 class="text-2xl font-bold mb-2 text-purple-400">Xác nhận quyền</h2><p class="text-slate-300 mb-6">Bạn có chắc muốn dùng quyền "Loại Bỏ GM" trong lượt này không?</p><div class="flex justify-center gap-4"><button id="confirm-remove-gm-yes" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-8 rounded-lg">Dùng</button><button id="confirm-remove-gm-no" class="bg-slate-600 hover:bg-slate-700 text-white font-bold py-2 px-6 rounded-lg">Không</button></div></div></div>
@@ -201,13 +215,18 @@
 
     <script>
         const FINISH_LINE = 10;
-        const NUM_PLAYERS_REQUIRED = 2; // Cần hằng số này ở client để vẽ bàn chơi
+        const NUM_PLAYERS_REQUIRED = 2;
         const dom = {};
         let currentGameState = {};
         let carElements = {};
-        const socket = io(); // Tự động kết nối ngay khi tải trang
+        let localPlayer = { userId: null, name: null };
+        const socket = io();
 
         function cacheDOMElements() {
+            // ... (cacheDOMElements giữ nguyên, thêm các element mới)
+            dom.welcomeMessage = document.getElementById('welcome-message');
+            dom.loginForm = document.getElementById('login-form');
+            dom.loginBtn = document.getElementById('login-btn');
             dom.lobbyScreen = document.getElementById('lobby-screen');
             dom.gameScreen = document.getElementById('game-screen');
             dom.playerNameInput = document.getElementById('player-name-input');
@@ -249,7 +268,7 @@
         const getColorClass = (c) => ({ R: 'red', G: 'green', Y: 'yellow' }[c] || 'gray');
         
         function setupGameBoard() {
-            const trackHeader = dom.racetrackPanel.querySelector('.track-header');
+             const trackHeader = dom.racetrackPanel.querySelector('.track-header');
             trackHeader.innerHTML = '<div></div>';
             for (let i = 0; i <= FINISH_LINE; i++) {
                 const headerCell = document.createElement('div');
@@ -261,7 +280,6 @@
             
             dom.lanesContainer.innerHTML = '';
             carElements = {};
-            // Vẽ tất cả các lane có thể có
             for (let i = 0; i < NUM_PLAYERS_REQUIRED; i++) {
                 const lane = document.createElement('div');
                 lane.className = 'track-lane';
@@ -280,7 +298,7 @@
                 
                 const car = document.createElement('div');
                 car.id = `car-${i}`;
-                car.className = `car player-${i} car-hidden`; // Luôn ẩn xe ban đầu
+                car.className = `car player-${i} car-hidden`;
                 car.textContent = i;
                 dom.lanesContainer.appendChild(car);
                 carElements[i] = car;
@@ -300,8 +318,7 @@
         function updateUI(state) {
             const oldPhase = currentGameState.gamePhase;
             currentGameState = state;
-
-            // Render các lane dựa trên số người chơi đang kết nối
+            
             for(let i = 0; i < NUM_PLAYERS_REQUIRED; i++) {
                 const player = state.players.find(p => p.id === i);
                 const carEl = carElements[i];
@@ -309,27 +326,24 @@
                 const choiceIndicator = document.getElementById(`player-choice-indicator-${i}`);
 
                 if (player && player.isConnected) {
-                    carEl.classList.toggle('my-car', player.socketId === socket.id);
+                    carEl.classList.toggle('my-car', player.userId === localPlayer.userId);
                     const cellEl = document.getElementById(`cell-${player.id}-${player.position}`);
                     if (cellEl) {
-                        const carSize = 40; // Kích thước xe là cố định
+                        const carSize = 40;
                         const targetX = cellEl.offsetLeft + (cellEl.offsetWidth / 2) - (carSize / 2);
                         const targetY = cellEl.offsetTop + (cellEl.offsetHeight / 2) - (carSize / 2);
                         carEl.style.transform = `translate(${targetX}px, ${targetY}px)`;
                     }
 
-                     // Trigger entry animation
                     if (carEl.classList.contains('car-hidden')) {
-                         setTimeout(() => {
-                            carEl.classList.remove('car-hidden');
-                        }, 100 + (player.id * 80));
+                         setTimeout(() => carEl.classList.remove('car-hidden'), 100 + (player.id * 80));
                     }
                     
                     namePlate.textContent = player.name;
                     namePlate.classList.remove('is-my-turn');
                     if (state.gamePhase === 'CHOOSING' && !player.isFinished) {
                         choiceIndicator.textContent = player.choice ? 'Đã chọn ✔' : 'Đang chọn...';
-                         if (player.socketId === socket.id && !player.choice) {
+                         if (player.userId === localPlayer.userId && !player.choice) {
                            namePlate.classList.add('is-my-turn');
                         }
                     } else {
@@ -337,7 +351,6 @@
                     }
 
                 } else {
-                    // Nếu không có người chơi ở vị trí này, ẩn xe và xóa tên
                     if (carEl) carEl.classList.add('car-hidden');
                     if (namePlate) namePlate.textContent = `(Chờ...)`;
                     if (choiceIndicator) choiceIndicator.textContent = '';
@@ -347,7 +360,7 @@
 
             if (state.gamePhase === 'CHOOSING' && oldPhase !== 'CHOOSING') {
                 clearMovementVisuals();
-                hidePlayerChoices(); // Instantly remove choices from previous turn
+                hidePlayerChoices();
             }
             
             dom.turnCounter.textContent = state.turn;
@@ -395,16 +408,16 @@
                 dom.statusMessage.innerHTML = state.lastLog.message;
             }
 
-            const me = state.players.find(p => p.socketId === socket.id);
+            const me = state.players.find(p => p.userId === localPlayer.userId);
+            const controlsPanel = document.getElementById('main-controls-panel');
             if(me) {
-                document.getElementById('main-controls-panel').style.display = 'block';
+                controlsPanel.style.display = 'block';
                 const canChoose = state.gamePhase === 'CHOOSING' && !me.isFinished && !me.choice;
                 ['R', 'G', 'Y'].forEach(c => dom.cardButtons[c].disabled = !(canChoose && me.lastPlayed !== c));
                 dom.cardButtons['W'].disabled = !(canChoose && me.hasWhiteCard);
                 dom.removeGmButton.disabled = !(canChoose && me.canUseRemoveGm);
             } else {
-                // Nếu là khách, ẩn bảng điều khiển
-                document.getElementById('main-controls-panel').style.display = 'none';
+                controlsPanel.style.display = 'none';
             }
             
             updateRankingBoard(state);
@@ -425,7 +438,7 @@
                  const rank = index + 1;
                  const rankColor = rank === 1 ? 'text-amber-400' : (rank === 2 ? 'text-slate-300' : 'text-slate-400');
                  const playerEl = document.createElement('div');
-                 playerEl.className = `flex items-center bg-slate-800/50 p-1.5 rounded-md transition-all ${p.isFinished ? 'opacity-60' : ''} ${p.socketId === socket.id ? 'border border-amber-400' : ''}`;
+                 playerEl.className = `flex items-center bg-slate-800/50 p-1.5 rounded-md transition-all ${p.isFinished ? 'opacity-60' : ''} ${p.userId === localPlayer.userId ? 'border border-amber-400' : ''}`;
                  let positionOrFinish = p.isFinished ? `<div class="text-xs text-center text-green-400">Lượt ${p.finishTurn}<br>🏁</div>` : `<div class="font-bold text-base">${p.position}</div>`;
                  playerEl.innerHTML = `<div class="w-6 text-center"><span class="font-bold text-sm ${rankColor}">#${rank}</span></div><div class="player-avatar w-7 h-7 rounded-full player-${p.id} flex items-center justify-center font-bold text-xs border-2 border-slate-600 flex-shrink-0">${p.id}</div><div class="flex-grow px-2"><p class="font-bold text-sm">${p.name}</p></div><div class="text-right w-12 text-center flex-shrink-0">${positionOrFinish}</div>`;
                 dom.rankingList.appendChild(playerEl);
@@ -433,7 +446,6 @@
         }
         
         function updateColorCountsUI(counts, gamePhase, oldPhase) {
-            // Chỉ animate khi giai đoạn vừa chuyển sang REVEAL
             const shouldAnimate = gamePhase === 'REVEAL' && oldPhase !== 'REVEAL';
 
             dom.colorCountsDisplay.innerHTML = '';
@@ -460,7 +472,6 @@
         }
 
         function visualizeMovements(movements) {
-            // Animate choices fading out
             document.querySelectorAll('.choice-display').forEach(div => {
                 div.style.transition = 'opacity 0.3s ease-out';
                 div.style.opacity = '0';
@@ -480,7 +491,7 @@
         }
         
         function displayPlayerChoices(players) {
-            hidePlayerChoices(); // Xóa các lựa chọn cũ
+            hidePlayerChoices();
             players.forEach(p => {
                 if (!p.isFinished && p.choice) {
                     const carEl = document.getElementById(`car-${p.id}`);
@@ -489,14 +500,9 @@
                     const choiceDiv = document.createElement('div');
                     choiceDiv.className = `choice-display bg-${getColorClass(p.choice)}-500 ${p.choice === 'W' || p.choice === 'Y' ? 'text-black' : 'text-white'}`;
                     choiceDiv.textContent = p.choice;
-
-                    // Lấy vị trí của xe TRƯỚC KHI thêm vào DOM
                     const style = window.getComputedStyle(carEl);
                     const matrix = new DOMMatrixReadOnly(style.transform);
-
-                    // Đặt vị trí transform TRƯỚC KHI thêm vào DOM để tránh bị "nhảy"
                     choiceDiv.style.transform = `translate(${matrix.e + 4}px, ${matrix.f - 35}px)`;
-                    
                     dom.lanesContainer.appendChild(choiceDiv);
                 }
             });
@@ -507,35 +513,39 @@
             dom.lobbyScreen.style.display = 'flex';
             dom.gameOverModal.classList.add('hidden');
             dom.lanesContainer.innerHTML = '';
-            
-            // Không ngắt kết nối socket, chỉ yêu cầu lại danh sách phòng
             socket.emit('requestRoomList');
         }
 
         function setupEventListeners() {
+            dom.loginBtn.addEventListener('click', () => {
+                const name = dom.playerNameInput.value.trim();
+                if (name) {
+                    socket.emit('authenticate', { name });
+                    dom.lobbyError.textContent = 'Đang đăng ký...';
+                } else {
+                    dom.lobbyError.textContent = 'Vui lòng nhập tên.';
+                }
+            });
+
             dom.createRoomBtn.addEventListener('click', () => {
-                const playerName = dom.playerNameInput.value.trim();
-                if (!playerName) {
-                    dom.lobbyError.textContent = 'Vui lòng nhập tên để tạo phòng.';
+                if (!localPlayer.userId) {
+                    dom.lobbyError.textContent = 'Vui lòng lưu tên của bạn trước khi tạo phòng.';
                     return;
                 }
-                dom.lobbyError.textContent = '';
-                socket.emit('createRoom', { name: playerName });
+                socket.emit('createRoom');
             });
             
             dom.joinRoomBtn.addEventListener('click', () => {
-                const playerName = dom.playerNameInput.value.trim();
                 const roomId = dom.roomIdInput.value.trim().toUpperCase();
-                 if (!playerName) {
-                    dom.lobbyError.textContent = 'Vui lòng nhập tên để vào phòng.';
+                 if (!localPlayer.userId) {
+                    dom.lobbyError.textContent = 'Vui lòng lưu tên của bạn trước khi vào phòng.';
                     return;
                 }
                 if (!roomId) {
                     dom.lobbyError.textContent = 'Vui lòng nhập mã phòng.';
                     return;
                 }
-                dom.lobbyError.textContent = '';
-                socket.emit('joinRoom', { roomId: roomId, name: playerName });
+                socket.emit('joinRoom', roomId);
             });
 
 
@@ -586,13 +596,36 @@
 
         function setupSocketListeners() {
             socket.on('connect', () => {
-                dom.noRoomsMessage.textContent = 'Đang tải danh sách phòng...';
-                socket.emit('requestRoomList');
+                const userId = localStorage.getItem('racingGameUserId');
+                if (userId) {
+                    socket.emit('authenticate', { userId });
+                } else {
+                    // Hiển thị form đăng nhập nếu không có userId
+                    dom.loginForm.style.display = 'block';
+                    dom.createRoomBtn.style.display = 'none';
+                    dom.joinRoomBtn.parentElement.style.display = 'none';
+                    dom.roomIdInput.parentElement.parentElement.previousElementSibling.style.display = 'none'; // an HOAC
+                }
+            });
+            
+            socket.on('authenticated', (data) => {
+                localStorage.setItem('racingGameUserId', data.userId);
+                localPlayer = data;
+                dom.lobbyError.textContent = '';
+                dom.loginForm.style.display = 'none';
+                dom.welcomeMessage.innerHTML = `Chào mừng trở lại, <b class="text-amber-400">${data.name}</b>!`;
+                // Hiện lại các nút hành động
+                 dom.createRoomBtn.style.display = 'block';
+                 dom.joinRoomBtn.parentElement.style.display = 'flex';
+                 dom.roomIdInput.parentElement.parentElement.previousElementSibling.style.display = 'flex';
             });
 
-            socket.on('disconnect', () => {
-                dom.lobbyError.textContent = 'Mất kết nối tới sảnh chờ.';
+            socket.on('authError', (message) => {
+                dom.lobbyError.textContent = message;
+                localStorage.removeItem('racingGameUserId');
             });
+
+            socket.on('disconnect', () => dom.lobbyError.textContent = 'Mất kết nối tới sảnh chờ.');
 
             socket.on('updateRoomList', (rooms) => {
                 const roomListDiv = dom.roomList;
@@ -631,15 +664,14 @@
                 }
             });
 
-            socket.on('connect_error', (err) => {
-                 dom.lobbyError.textContent = "Lỗi kết nối: " + err.message;
-            });
+            socket.on('connect_error', (err) => dom.lobbyError.textContent = "Lỗi kết nối: " + err.message);
+            
             socket.on('roomJoined', (data) => {
                 dom.roomIdDisplay.textContent = data.roomId;
                 dom.lobbyScreen.style.display = 'none';
                 dom.gameScreen.style.display = 'block';
                 dom.lobbyError.textContent = '';
-                setupGameBoard(); // Thiết lập bàn chơi trước khi cập nhật UI
+                setupGameBoard();
                 updateUI(data.gameState);
             });
             socket.on('gameStateUpdate', updateUI);
