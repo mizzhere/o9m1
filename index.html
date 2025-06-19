@@ -1,9 +1,4 @@
 <!DOCTYPE html>
-<!-- 
-    FILE: index.html (Client-Side)
-    UPDATE: 
-    - Thêm khu vực "Sảnh chờ" để hiển thị danh sách các phòng đang có.
--->
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
@@ -49,7 +44,16 @@
         .track-cell.move-forward { background-color: #166534 !important; }
         .track-cell.move-backward { background-color: #991b1b !important; }
         .track-cell.finish { background: repeating-linear-gradient(45deg, #64748b, #64748b 5px, #475569 5px, #475569 10px); }
-        .car { position: absolute; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.125rem; transition: all 0.7s cubic-bezier(0.45, 0.05, 0.55, 0.95); border: 3px solid rgba(255, 255, 255, 0.7); box-shadow: 0 4px 15px rgba(0,0,0,0.5); text-shadow: 0 1px 2px rgba(0,0,0,0.5); z-index: 10; }
+        .car { 
+            position: absolute; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.125rem; 
+            transition: transform 0.7s cubic-bezier(0.45, 0.05, 0.55, 0.95), opacity 0.5s ease; 
+            border: 3px solid rgba(255, 255, 255, 0.7); box-shadow: 0 4px 15px rgba(0,0,0,0.5); text-shadow: 0 1px 2px rgba(0,0,0,0.5); z-index: 10; 
+            opacity: 1;
+        }
+        .car.car-hidden {
+            opacity: 0;
+            transform: scale(0);
+        }
         .my-car { border-color: #ffffff; box-shadow: 0 0 20px rgba(251, 191, 36, 0.5); z-index: 11; }
         .player-0 { background-image: linear-gradient(to top, #3b82f6, #60a5fa); color: white;}
         .player-1 { background-image: linear-gradient(to top, #ef4444, #f87171); color: white;}
@@ -71,10 +75,11 @@
         .lobby-input { background: #334155; border: 1px solid #475569; border-radius: 0.5rem; padding: 0.75rem 1rem; text-align: left; font-size: 1rem; transition: all 0.2s ease; }
         .lobby-input:focus { border-color: #3b82f6; background-color: #1e293b; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3); outline: none; }
         .lobby-btn { background-color: #3b82f6; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-weight: bold; transition: all 0.2s; }
-        .lobby-btn:hover { background-color: #2563eb; transform: translateY(-2px); }
+        .lobby-btn:hover:not(:disabled) { background-color: #2563eb; transform: translateY(-2px); }
         .lobby-btn.create { background-color: #16a34a; }
-        .lobby-btn.create:hover { background-color: #15803d; }
-        
+        .lobby-btn.create:hover:not(:disabled) { background-color: #15803d; }
+        .lobby-btn:disabled { background-color: #475569; cursor: not-allowed; transform: none; }
+
         .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(15, 23, 42, 0.8); display: flex; justify-content: center; align-items: center; z-index: 100; backdrop-filter: blur(5px); animation: fade-in 0.3s ease; }
         .modal-content { background-color: #1e293b; padding: 2rem; border-radius: 0.75rem; text-align: center; border: 1px solid #475569; box-shadow: 0 10px 30px rgba(0,0,0,0.5); animation: pop-in 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
         
@@ -96,19 +101,17 @@
             <p class="text-slate-400 mb-6">Nơi những cuộc đua nghẹt thở bắt đầu</p>
 
             <div class="grid grid-cols-2 gap-6">
-                <!-- Left Column: Room List -->
                 <div class="text-left">
                     <h3 class="text-lg font-bold text-slate-200 mb-3 border-b border-slate-700 pb-2">Sảnh Chờ</h3>
                     <div id="room-list" class="space-y-2 max-h-48 overflow-y-auto pr-2">
-                         <p id="no-rooms-message" class="text-slate-500 italic mt-4">Không có phòng nào đang chờ.</p>
+                         <p id="no-rooms-message" class="text-slate-500 italic mt-4">Đang kết nối tới sảnh...</p>
                     </div>
                 </div>
 
-                <!-- Right Column: Actions -->
                 <div class="flex flex-col gap-4 text-left">
                      <div>
                         <label for="player-name-input" class="block mb-1 text-sm font-medium text-slate-300">Tên tay đua</label>
-                        <input type="text" id="player-name-input" placeholder="Nhập tên của bạn" class="lobby-input w-full" maxlength="15">
+                        <input type="text" id="player-name-input" placeholder="Nhập tên để vào chơi" class="lobby-input w-full" maxlength="15">
                     </div>
                     <button id="create-room-btn" class="lobby-btn create w-full py-3 mt-2">Tạo Phòng Mới</button>
                     <div class="flex items-center gap-3">
@@ -184,7 +187,6 @@
         </div>
     </div>
     
-    <!-- MODALS -->
     <div id="game-over-modal" class="modal-overlay hidden"><div class="modal-content max-w-lg w-full"><h2 class="text-3xl font-bold mb-4 text-amber-400">TRÒ CHƠI KẾT THÚC</h2><div id="modal-ranking" class="space-y-1"></div><button id="back-to-lobby-btn" class="mt-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg">Về Sảnh Chờ</button></div></div>
     <div id="reselect-modal" class="modal-overlay hidden"><div class="modal-content max-w-md w-full"><h2 class="text-2xl font-bold mb-2 text-red-500">Thẻ Trắng Vô Hiệu!</h2><p class="text-slate-300 mb-6">Bạn phải chọn một màu khác thay thế.</p><div id="reselect-options" class="flex justify-center gap-4"><button data-color="R" class="card-btn py-2 px-3 bg-red-500 text-white w-24 h-20">ĐỎ</button><button data-color="G" class="card-btn py-2 px-3 bg-green-500 text-white w-24 h-20">XANH</button><button data-color="Y" class="card-btn py-2 px-3 bg-yellow-400 text-slate-800 w-24 h-20">VÀNG</button></div></div></div>
     <div id="remove-gm-modal" class="modal-overlay hidden"><div class="modal-content max-w-sm w-full"><h2 class="text-2xl font-bold mb-2 text-purple-400">Xác nhận quyền</h2><p class="text-slate-300 mb-6">Bạn có chắc muốn dùng quyền "Loại Bỏ GM" trong lượt này không?</p><div class="flex justify-center gap-4"><button id="confirm-remove-gm-yes" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-8 rounded-lg">Dùng</button><button id="confirm-remove-gm-no" class="bg-slate-600 hover:bg-slate-700 text-white font-bold py-2 px-6 rounded-lg">Không</button></div></div></div>
@@ -199,10 +201,11 @@
 
     <script>
         const FINISH_LINE = 10;
+        const NUM_PLAYERS_REQUIRED = 2; // Cần hằng số này ở client để vẽ bàn chơi
         const dom = {};
         let currentGameState = {};
         let carElements = {};
-        const socket = io({ autoConnect: false });
+        const socket = io(); // Tự động kết nối ngay khi tải trang
 
         function cacheDOMElements() {
             dom.lobbyScreen = document.getElementById('lobby-screen');
@@ -245,7 +248,7 @@
 
         const getColorClass = (c) => ({ R: 'red', G: 'green', Y: 'yellow' }[c] || 'gray');
         
-        function setupGameBoard(state) {
+        function setupGameBoard() {
             const trackHeader = dom.racetrackPanel.querySelector('.track-header');
             trackHeader.innerHTML = '<div></div>';
             for (let i = 0; i <= FINISH_LINE; i++) {
@@ -258,8 +261,8 @@
             
             dom.lanesContainer.innerHTML = '';
             carElements = {};
-            state.players.forEach(p => {
-                const i = p.id;
+            // Vẽ tất cả các lane có thể có
+            for (let i = 0; i < NUM_PLAYERS_REQUIRED; i++) {
                 const lane = document.createElement('div');
                 lane.className = 'track-lane';
                 lane.id = `lane-${i}`;
@@ -274,13 +277,14 @@
                     lane.appendChild(cell);
                 }
                 dom.lanesContainer.appendChild(lane);
+                
                 const car = document.createElement('div');
                 car.id = `car-${i}`;
-                car.className = `car player-${i}`;
+                car.className = `car player-${i} car-hidden`; // Luôn ẩn xe ban đầu
                 car.textContent = i;
                 dom.lanesContainer.appendChild(car);
                 carElements[i] = car;
-            });
+            }
         }
 
         function clearMovementVisuals() {
@@ -297,44 +301,55 @@
             const oldPhase = currentGameState.gamePhase;
             currentGameState = state;
 
-            if (!document.getElementById(`lane-${state.players[0].id}`)) {
-                setupGameBoard(state);
-            }
+            // Render các lane dựa trên số người chơi đang kết nối
+            for(let i = 0; i < NUM_PLAYERS_REQUIRED; i++) {
+                const player = state.players.find(p => p.id === i);
+                const carEl = carElements[i];
+                const namePlate = document.getElementById(`player-name-${i}`);
+                const choiceIndicator = document.getElementById(`player-choice-indicator-${i}`);
 
-            if (state.gamePhase === 'CHOOSING' && oldPhase !== 'CHOOSING') {
-                clearMovementVisuals();
-                hidePlayerChoices();
-            }
-
-            state.players.forEach(p => {
-                const carEl = carElements[p.id];
-                if (carEl) {
-                    carEl.classList.toggle('my-car', p.socketId === socket.id);
-                    const cellEl = document.getElementById(`cell-${p.id}-${p.position}`);
+                if (player && player.isConnected) {
+                    carEl.classList.toggle('my-car', player.socketId === socket.id);
+                    const cellEl = document.getElementById(`cell-${player.id}-${player.position}`);
                     if (cellEl) {
-                        const carSize = carEl.offsetWidth;
+                        const carSize = 40; // Kích thước xe là cố định
                         const targetX = cellEl.offsetLeft + (cellEl.offsetWidth / 2) - (carSize / 2);
                         const targetY = cellEl.offsetTop + (cellEl.offsetHeight / 2) - (carSize / 2);
                         carEl.style.transform = `translate(${targetX}px, ${targetY}px)`;
                     }
-                }
-                const namePlate = document.getElementById(`player-name-${p.id}`);
-                if (namePlate) namePlate.textContent = p.name || `Player ${p.id}`;
 
-                const choiceIndicator = document.getElementById(`player-choice-indicator-${p.id}`);
-                if (choiceIndicator) {
+                     // Trigger entry animation
+                    if (carEl.classList.contains('car-hidden')) {
+                         setTimeout(() => {
+                            carEl.classList.remove('car-hidden');
+                        }, 100 + (player.id * 80));
+                    }
+                    
+                    namePlate.textContent = player.name;
                     namePlate.classList.remove('is-my-turn');
-                    if (state.gamePhase === 'CHOOSING' && !p.isFinished && p.isConnected) {
-                        choiceIndicator.textContent = p.choice ? 'Đã chọn ✔' : 'Đang chọn...';
-                        if (p.socketId === socket.id && !p.choice) {
+                    if (state.gamePhase === 'CHOOSING' && !player.isFinished) {
+                        choiceIndicator.textContent = player.choice ? 'Đã chọn ✔' : 'Đang chọn...';
+                         if (player.socketId === socket.id && !player.choice) {
                            namePlate.classList.add('is-my-turn');
                         }
                     } else {
                         choiceIndicator.textContent = '';
                     }
-                }
-            });
 
+                } else {
+                    // Nếu không có người chơi ở vị trí này, ẩn xe và xóa tên
+                    if (carEl) carEl.classList.add('car-hidden');
+                    if (namePlate) namePlate.textContent = `(Chờ...)`;
+                    if (choiceIndicator) choiceIndicator.textContent = '';
+                }
+            }
+
+
+            if (state.gamePhase === 'CHOOSING' && oldPhase !== 'CHOOSING') {
+                clearMovementVisuals();
+                hidePlayerChoices(); // Instantly remove choices from previous turn
+            }
+            
             dom.turnCounter.textContent = state.turn;
             
             dom.gmColorContainer.innerHTML = '';
@@ -382,14 +397,18 @@
 
             const me = state.players.find(p => p.socketId === socket.id);
             if(me) {
+                document.getElementById('main-controls-panel').style.display = 'block';
                 const canChoose = state.gamePhase === 'CHOOSING' && !me.isFinished && !me.choice;
                 ['R', 'G', 'Y'].forEach(c => dom.cardButtons[c].disabled = !(canChoose && me.lastPlayed !== c));
                 dom.cardButtons['W'].disabled = !(canChoose && me.hasWhiteCard);
                 dom.removeGmButton.disabled = !(canChoose && me.canUseRemoveGm);
+            } else {
+                // Nếu là khách, ẩn bảng điều khiển
+                document.getElementById('main-controls-panel').style.display = 'none';
             }
             
             updateRankingBoard(state);
-            updateColorCountsUI(state.colorCounts, state.gamePhase);
+            updateColorCountsUI(state.colorCounts, state.gamePhase, oldPhase);
             highlightLeaderColumn(state);
         }
         
@@ -413,10 +432,13 @@
             });
         }
         
-        function updateColorCountsUI(counts, gamePhase) {
+        function updateColorCountsUI(counts, gamePhase, oldPhase) {
+            // Chỉ animate khi giai đoạn vừa chuyển sang REVEAL
+            const shouldAnimate = gamePhase === 'REVEAL' && oldPhase !== 'REVEAL';
+
             dom.colorCountsDisplay.innerHTML = '';
-            if(!counts) return;
-            const shouldAnimate = gamePhase === 'REVEAL';
+            if (!counts) return;
+
             ['R', 'G', 'Y'].forEach(color => {
                 if (counts[color] > 0) {
                     const tag = document.createElement('div');
@@ -438,6 +460,13 @@
         }
 
         function visualizeMovements(movements) {
+            // Animate choices fading out
+            document.querySelectorAll('.choice-display').forEach(div => {
+                div.style.transition = 'opacity 0.3s ease-out';
+                div.style.opacity = '0';
+                div.addEventListener('transitionend', () => div.remove(), { once: true });
+            });
+
             clearMovementVisuals();
             if (!movements) return;
             Object.entries(movements).forEach(([id, data]) => {
@@ -451,18 +480,24 @@
         }
         
         function displayPlayerChoices(players) {
-            hidePlayerChoices(); // Clear old choices first
+            hidePlayerChoices(); // Xóa các lựa chọn cũ
             players.forEach(p => {
                 if (!p.isFinished && p.choice) {
                     const carEl = document.getElementById(`car-${p.id}`);
                     if (!carEl) return;
+                    
                     const choiceDiv = document.createElement('div');
                     choiceDiv.className = `choice-display bg-${getColorClass(p.choice)}-500 ${p.choice === 'W' || p.choice === 'Y' ? 'text-black' : 'text-white'}`;
                     choiceDiv.textContent = p.choice;
-                    dom.lanesContainer.appendChild(choiceDiv);
+
+                    // Lấy vị trí của xe TRƯỚC KHI thêm vào DOM
                     const style = window.getComputedStyle(carEl);
                     const matrix = new DOMMatrixReadOnly(style.transform);
+
+                    // Đặt vị trí transform TRƯỚC KHI thêm vào DOM để tránh bị "nhảy"
                     choiceDiv.style.transform = `translate(${matrix.e + 4}px, ${matrix.f - 35}px)`;
+                    
+                    dom.lanesContainer.appendChild(choiceDiv);
                 }
             });
         }
@@ -472,26 +507,37 @@
             dom.lobbyScreen.style.display = 'flex';
             dom.gameOverModal.classList.add('hidden');
             dom.lanesContainer.innerHTML = '';
-            socket.disconnect();
+            
+            // Không ngắt kết nối socket, chỉ yêu cầu lại danh sách phòng
+            socket.emit('requestRoomList');
         }
 
         function setupEventListeners() {
-            function connectAndJoin(action, payload) {
+            dom.createRoomBtn.addEventListener('click', () => {
                 const playerName = dom.playerNameInput.value.trim();
                 if (!playerName) {
-                    dom.lobbyError.textContent = 'Vui lòng nhập tên của bạn.';
+                    dom.lobbyError.textContent = 'Vui lòng nhập tên để tạo phòng.';
                     return;
                 }
-                socket.auth = { name: playerName };
-                socket.connect();
-                socket.emit(action, payload);
-            }
-
-            dom.createRoomBtn.addEventListener('click', () => connectAndJoin('createRoom'));
-            dom.joinRoomBtn.addEventListener('click', () => {
-                const roomId = dom.roomIdInput.value.trim().toUpperCase();
-                if (roomId) connectAndJoin('joinRoom', roomId);
+                dom.lobbyError.textContent = '';
+                socket.emit('createRoom', { name: playerName });
             });
+            
+            dom.joinRoomBtn.addEventListener('click', () => {
+                const playerName = dom.playerNameInput.value.trim();
+                const roomId = dom.roomIdInput.value.trim().toUpperCase();
+                 if (!playerName) {
+                    dom.lobbyError.textContent = 'Vui lòng nhập tên để vào phòng.';
+                    return;
+                }
+                if (!roomId) {
+                    dom.lobbyError.textContent = 'Vui lòng nhập mã phòng.';
+                    return;
+                }
+                dom.lobbyError.textContent = '';
+                socket.emit('joinRoom', { roomId: roomId, name: playerName });
+            });
+
 
             dom.leaveRoomBtn.addEventListener('click', () => {
                 socket.emit('leaveRoom');
@@ -540,8 +586,12 @@
 
         function setupSocketListeners() {
             socket.on('connect', () => {
-                // When connecting (or reconnecting), request the latest room list
+                dom.noRoomsMessage.textContent = 'Đang tải danh sách phòng...';
                 socket.emit('requestRoomList');
+            });
+
+            socket.on('disconnect', () => {
+                dom.lobbyError.textContent = 'Mất kết nối tới sảnh chờ.';
             });
 
             socket.on('updateRoomList', (rooms) => {
@@ -582,13 +632,14 @@
             });
 
             socket.on('connect_error', (err) => {
-                 dom.lobbyError.textContent = err.message;
+                 dom.lobbyError.textContent = "Lỗi kết nối: " + err.message;
             });
             socket.on('roomJoined', (data) => {
                 dom.roomIdDisplay.textContent = data.roomId;
                 dom.lobbyScreen.style.display = 'none';
                 dom.gameScreen.style.display = 'block';
                 dom.lobbyError.textContent = '';
+                setupGameBoard(); // Thiết lập bàn chơi trước khi cập nhật UI
                 updateUI(data.gameState);
             });
             socket.on('gameStateUpdate', updateUI);
@@ -604,7 +655,6 @@
                 if(dom.lobbyScreen.style.display !== 'none') {
                     dom.lobbyError.textContent = message;
                 }
-                goToLobby();
             });
         }
 
