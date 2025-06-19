@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<!-- 
+    FILE: index.html (Client-Side)
+    UPDATE: 
+    - Redesigned Lobby UI for a modern look.
+    - Fixed movement path color display bug.
+    - Player choices now hide automatically at the start of a new turn.
+    - Ensured full log history functionality is working.
+-->
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game Đua Xe Nhiều Người Chơi</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <style>
+        @keyframes fade-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in { animation: fade-in 0.5s ease-out; }
+        @keyframes pop-in { 0% { opacity: 0; transform: scale(0.8); } 80% { opacity: 1; transform: scale(1.05); } 100% { opacity: 1; transform: scale(1); } }
+        
+        body { 
+            font-family: 'Be Vietnam Pro', sans-serif; 
+            background: #0f172a;
+            color: #e2e8f0; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            height: 100vh; 
+            padding: 1rem; 
+            overflow: hidden; 
+            background-image: radial-gradient(circle at top right, #3b82f630, transparent 40%), radial-gradient(circle at bottom left, #ef444430, transparent 40%);
+        }
+
+        #game-container { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 1rem; }
+        .main-grid { flex-grow: 1; display: grid; grid-template-columns: 3fr 1fr; gap: 1rem; min-height: 0; }
+        
+        #racetrack-panel { background-color: #1e293b; border-radius: 0.75rem; padding: 1rem; display: flex; flex-direction: column; border: 1px solid #334155; gap: 0.5rem; }
+        .track-header { display: grid; grid-template-columns: 60px repeat(11, 1fr); gap: 0.25rem; }
+        .header-cell { text-align: center; font-size: 0.8rem; color: #94a3b8; transition: all 0.3s; }
+        .leading-column { color: #facc15; font-weight: bold; transform: scale(1.1); }
+        .lanes-container { display: flex; flex-direction: column; gap: 0.5rem; flex-grow: 1; position: relative; }
+        .track-lane { display: grid; grid-template-columns: 60px repeat(11, 1fr); gap: 0.25rem; align-items: center; height: 100%; }
+        .player-lane-info { font-weight: bold; text-align: center; font-size: 0.9rem; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .player-name-plate { transition: all 0.3s; }
+        .is-my-turn { font-size: 1.1rem; text-shadow: 0 0 10px #facc15; }
+        .player-choice-indicator { font-size: 0.75rem; color: #94a3b8; margin-top: 2px; height: 1.2rem; transition: all 0.3s; }
+        .track-cell { background-color: #334155; border-radius: 0.375rem; height: 100%; transition: background-color 0.4s ease-in-out; position: relative; }
+        .track-cell.move-forward { background-color: #166534 !important; }
+        .track-cell.move-backward { background-color: #991b1b !important; }
+        .track-cell.finish { background: repeating-linear-gradient(45deg, #64748b, #64748b 5px, #475569 5px, #475569 10px); }
+        .car { position: absolute; width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1.125rem; transition: all 0.7s cubic-bezier(0.45, 0.05, 0.55, 0.95); border: 3px solid rgba(255, 255, 255, 0.7); box-shadow: 0 4px 15px rgba(0,0,0,0.5); text-shadow: 0 1px 2px rgba(0,0,0,0.5); z-index: 10; }
+        .my-car { border-color: #ffffff; box-shadow: 0 0 20px rgba(251, 191, 36, 0.5); z-index: 11; }
+        .player-0 { background-image: linear-gradient(to top, #3b82f6, #60a5fa); color: white;}
+        .player-1 { background-image: linear-gradient(to top, #ef4444, #f87171); color: white;}
+        .player-2 { background-image: linear-gradient(to top, #22c55e, #4ade80); color: white;}
+        .player-3 { background-image: linear-gradient(to top, #eab308, #facc15); color: #1e293b;}
+        .player-4 { background-image: linear-gradient(to top, #8b5cf6, #a78bfa); color: white;}
+        .player-5 { background-image: linear-gradient(to top, #ec4899, #f9a8d4); color: white;}
+        .choice-display { position: absolute; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 1rem; border: 2px solid rgba(255, 255, 255, 0.9); z-index: 20; box-shadow: 0 5px 10px rgba(0,0,0,0.4); animation: pop-in 0.5s; }
+        
+        .panel { background-color: #1e293b; border-radius: 0.75rem; padding: 1rem; border: 1px solid #334155; display: flex; flex-direction: column; }
+        .card-btn { transition: all 0.2s ease; border-width: 2px; border-color: transparent; font-weight: 700; border-radius: 0.5rem; box-shadow: 0 2px 5px rgba(0,0,0,0.3), inset 0 1px 1px rgba(255,255,255,0.1); text-shadow: 0 1px 2px rgba(0,0,0,0.4); position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .card-btn:disabled { filter: grayscale(80%); opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+        .card-btn:hover:not(:disabled) { transform: translateY(-3px); box-shadow: 0 6px 12px rgba(0,0,0,0.4), inset 0 1px 1px rgba(255,255,255,0.1); }
+        .info-tag { padding: 0.35rem 0.85rem; border-radius: 0.375rem; font-weight: bold; font-size: 0.9rem; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+        .info-tag.animate { animation: pop-in 0.5s; }
+        
+        /* NEW LOBBY STYLE */
+        #lobby-screen { display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; width: 100%; height: 100%; animation: fade-in 0.5s; }
+        .lobby-box { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); padding: 2.5rem; border-radius: 1rem; border: 1px solid #334155; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 100%; max-width: 450px; }
+        .lobby-input { background: #334155; border: 1px solid #475569; border-radius: 0.5rem; padding: 0.75rem 1rem; text-align: left; font-size: 1rem; transition: all 0.2s ease; }
+        .lobby-input:focus { border-color: #3b82f6; background-color: #1e293b; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3); outline: none; }
+        .lobby-btn { background-color: #3b82f6; color: white; padding: 0.75rem 1.5rem; border-radius: 0.5rem; font-weight: bold; transition: all 0.2s; }
+        .lobby-btn:hover { background-color: #2563eb; transform: translateY(-2px); }
+        .lobby-btn.create { background-color: #16a34a; }
+        .lobby-btn.create:hover { background-color: #15803d; }
+        
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(15, 23, 42, 0.8); display: flex; justify-content: center; align-items: center; z-index: 100; backdrop-filter: blur(5px); animation: fade-in 0.3s ease; }
+        .modal-content { background-color: #1e293b; padding: 2rem; border-radius: 0.75rem; text-align: center; border: 1px solid #475569; box-shadow: 0 10px 30px rgba(0,0,0,0.5); animation: pop-in 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+        
+        #game-screen { display: none; }
+        #room-info-bar { background: #1e293b; padding: 0.5rem 1rem; border-radius: 0.5rem; border: 1px solid #334155; cursor: pointer; user-select: text; }
+        #current-status-bar:hover { background-color: #334155; }
+        #log-history-modal .modal-content { max-width: 90vw; width: 800px; height: 80vh; }
+        #log-history-content { height: 100%; overflow-y: auto; text-align: left; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
+    </style>
+</head>
+<body>
+
+    <div id="lobby-screen">
+        <div class="lobby-box">
+            <h1 class="text-4xl font-bold text-center text-amber-400 tracking-wider uppercase mb-2" style="text-shadow: 0 0 10px rgba(251, 191, 36, 0.5);">Đua Xe Online</h1>
+            <p class="text-slate-400 mb-8">Nơi những cuộc đua nghẹt thở bắt đầu</p>
+
+            <div class="flex flex-col gap-4 text-left">
+                <div>
+                    <label for="player-name-input" class="block mb-1 text-sm font-medium text-slate-300">Tên tay đua</label>
+                    <input type="text" id="player-name-input" placeholder="Nhập tên của bạn" class="lobby-input w-full" maxlength="15">
+                </div>
+                 <button id="create-room-btn" class="lobby-btn create w-full py-3 mt-4">Tạo Phòng Mới</button>
+                <div class="flex items-center gap-3 my-2">
+                    <hr class="flex-grow border-slate-600"><span class="text-slate-500 font-bold">HOẶC</span><hr class="flex-grow border-slate-600">
+                </div>
+                <div>
+                     <label for="room-id-input" class="block mb-1 text-sm font-medium text-slate-300">Tham gia phòng có sẵn</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="room-id-input" placeholder="NHẬP MÃ PHÒNG" class="lobby-input w-full uppercase text-center tracking-widest">
+                        <button id="join-room-btn" class="lobby-btn flex-shrink-0 px-6">Vào</button>
+                    </div>
+                </div>
+            </div>
+             <p id="lobby-error" class="text-red-500 mt-4 h-5"></p>
+        </div>
+    </div>
+
+    <div id="game-screen" class="w-full h-full">
+        <div id="game-container">
+            <div class="flex justify-between items-center">
+                <button id="leave-room-btn" class="text-sm bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md transition-transform hover:scale-105">Rời Phòng</button>
+                <h1 class="text-3xl font-bold text-center text-amber-400 tracking-wider uppercase" style="text-shadow: 0 0 10px rgba(251, 191, 36, 0.5);">Đua Xe Online</h1>
+                <div id="room-info-bar" title="Nhấn để sao chép mã phòng">
+                    <span class="text-slate-400 text-sm">MÃ PHÒNG:</span>
+                    <span id="room-id-display" class="font-bold text-amber-300 text-lg tracking-widest"></span>
+                </div>
+            </div>
+
+            <div class="main-grid">
+                <div id="racetrack-panel">
+                    <div class="track-header"></div>
+                    <div id="lanes-container" class="lanes-container"></div>
+                </div>
+
+                <div id="control-panel" class="flex flex-col gap-4">
+                    <div class="panel flex-grow min-h-0">
+                         <h2 class="text-xl font-bold mb-2 text-center text-slate-300 border-b border-slate-700 pb-2 flex-shrink-0">Bảng Xếp Hạng</h2>
+                         <div id="ranking-list" class="space-y-1 pr-2 overflow-y-auto"></div>
+                    </div>
+                    
+                    <div id="info-panel" class="panel p-3 flex-shrink-0">
+                        <div class="grid grid-cols-3 gap-2 items-center">
+                            <div class="text-center"><p class="font-bold text-sm text-slate-400">Lượt</p><p class="text-3xl font-extrabold text-white"><span id="turn-counter">1</span></p></div>
+                            <div class="text-center">
+                                <p class="font-bold text-sm text-slate-400">Màu GM</p>
+                                <div id="gm-color-container" class="flex justify-center items-center h-10 mt-1 gap-1">
+                                    <span class="w-10 h-10 inline-block rounded-full border-2 border-white align-middle shadow-lg transition-all flex items-center justify-center">?</span>
+                                </div>
+                            </div>
+                            <div class="text-center"><p class="font-bold text-sm text-slate-400">Ưu Tiên</p><span id="priority-color" class="w-10 h-10 mt-1 inline-block rounded-full border-2 border-white align-middle shadow-lg transition-all">?</span></div>
+                        </div>
+                        <div id="color-counts-display" class="flex justify-center items-center gap-3 mt-3 h-8"></div>
+                        <div id="special-effect-display" class="mt-3 text-center border-t border-slate-700 pt-2 h-10 flex items-center justify-center"></div>
+                    </div>
+
+                    <div id="main-controls-panel" class="panel p-3 flex-shrink-0">
+                        <div class="grid grid-cols-5 gap-2">
+                            <button id="card-R" class="card-btn py-2 px-3 bg-red-500 text-white h-16">ĐỎ</button>
+                            <button id="card-G" class="card-btn py-2 px-3 bg-green-500 text-white h-16">XANH</button>
+                            <button id="card-Y" class="card-btn py-2 px-3 bg-yellow-400 text-slate-800 h-16">VÀNG</button>
+                            <button id="card-W" class="card-btn py-2 px-3 bg-gray-200 text-black h-16">TRẮNG</button>
+                            <button id="power-remove-gm" class="card-btn py-2 px-3 bg-purple-600 text-white h-16 text-xs">LOẠI GM</button>
+                        </div>
+                    </div>
+                    
+                     <div id="current-status-bar" class="flex items-center bg-slate-800/80 border border-slate-700 rounded-lg p-3 min-h-[52px] cursor-pointer" title="Nhấn để xem toàn bộ nhật ký">
+                        <span id="status-tag" class="font-bold py-1 px-2.5 rounded mr-3 flex-shrink-0 text-sm bg-gray-500"></span>
+                        <span id="status-message" class="text-slate-400 text-sm"></span>
+                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- MODALS -->
+    <div id="game-over-modal" class="modal-overlay hidden"><div class="modal-content max-w-lg w-full"><h2 class="text-3xl font-bold mb-4 text-amber-400">TRÒ CHƠI KẾT THÚC</h2><div id="modal-ranking" class="space-y-1"></div><button id="back-to-lobby-btn" class="mt-6 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg">Về Sảnh Chờ</button></div></div>
+    <div id="reselect-modal" class="modal-overlay hidden"><div class="modal-content max-w-md w-full"><h2 class="text-2xl font-bold mb-2 text-red-500">Thẻ Trắng Vô Hiệu!</h2><p class="text-slate-300 mb-6">Bạn phải chọn một màu khác thay thế.</p><div id="reselect-options" class="flex justify-center gap-4"><button data-color="R" class="card-btn py-2 px-3 bg-red-500 text-white w-24 h-20">ĐỎ</button><button data-color="G" class="card-btn py-2 px-3 bg-green-500 text-white w-24 h-20">XANH</button><button data-color="Y" class="card-btn py-2 px-3 bg-yellow-400 text-slate-800 w-24 h-20">VÀNG</button></div></div></div>
+    <div id="remove-gm-modal" class="modal-overlay hidden"><div class="modal-content max-w-sm w-full"><h2 class="text-2xl font-bold mb-2 text-purple-400">Xác nhận quyền</h2><p class="text-slate-300 mb-6">Bạn có chắc muốn dùng quyền "Loại Bỏ GM" trong lượt này không?</p><div class="flex justify-center gap-4"><button id="confirm-remove-gm-yes" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-8 rounded-lg">Dùng</button><button id="confirm-remove-gm-no" class="bg-slate-600 hover:bg-slate-700 text-white font-bold py-2 px-6 rounded-lg">Không</button></div></div></div>
+    <div id="log-history-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+             <h2 class="text-2xl font-bold mb-4 text-slate-300">Nhật Ký Ván Đấu</h2>
+             <div id="log-history-content"></div>
+             <button id="close-log-modal" class="mt-6 bg-slate-600 hover:bg-slate-700 text-white font-bold py-2 px-6 rounded-lg">Đóng</button>
+        </div>
+    </div>
+
+
+    <script>
+        const FINISH_LINE = 10;
+        const dom = {};
+        let currentGameState = {};
+        let carElements = {};
+        const socket = io({ autoConnect: false });
+
+        function cacheDOMElements() {
+            dom.lobbyScreen = document.getElementById('lobby-screen');
+            dom.gameScreen = document.getElementById('game-screen');
+            dom.playerNameInput = document.getElementById('player-name-input');
+            dom.createRoomBtn = document.getElementById('create-room-btn');
+            dom.joinRoomBtn = document.getElementById('join-room-btn');
+            dom.roomIdInput = document.getElementById('room-id-input');
+            dom.lobbyError = document.getElementById('lobby-error');
+            dom.leaveRoomBtn = document.getElementById('leave-room-btn');
+            dom.racetrackPanel = document.getElementById('racetrack-panel');
+            dom.lanesContainer = document.getElementById('lanes-container');
+            dom.rankingList = document.getElementById('ranking-list');
+            dom.turnCounter = document.getElementById('turn-counter');
+            dom.gmColorContainer = document.getElementById('gm-color-container');
+            dom.priorityColorSpan = document.getElementById('priority-color');
+            dom.colorCountsDisplay = document.getElementById('color-counts-display');
+            dom.specialEffectDisplay = document.getElementById('special-effect-display');
+            dom.currentStatusBar = document.getElementById('current-status-bar');
+            dom.statusTag = document.getElementById('status-tag');
+            dom.statusMessage = document.getElementById('status-message');
+            dom.roomIdDisplay = document.getElementById('room-id-display');
+            dom.roomInfoBar = document.getElementById('room-info-bar');
+            dom.cardButtons = { R:document.getElementById('card-R'), G:document.getElementById('card-G'), Y:document.getElementById('card-Y'), W:document.getElementById('card-W') };
+            dom.removeGmButton = document.getElementById('power-remove-gm');
+            dom.gameOverModal = document.getElementById('game-over-modal');
+            dom.modalRanking = document.getElementById('modal-ranking');
+            dom.backToLobbyBtn = document.getElementById('back-to-lobby-btn');
+            dom.removeGmModal = document.getElementById('remove-gm-modal');
+            dom.confirmRemoveGmYes = document.getElementById('confirm-remove-gm-yes');
+            dom.confirmRemoveGmNo = document.getElementById('confirm-remove-gm-no');
+            dom.reselectModal = document.getElementById('reselect-modal');
+            dom.reselectOptions = document.getElementById('reselect-options');
+            dom.logHistoryModal = document.getElementById('log-history-modal');
+            dom.logHistoryContent = document.getElementById('log-history-content');
+            dom.closeLogModal = document.getElementById('close-log-modal');
+        }
+
+        const getColorClass = (c) => ({ R: 'red', G: 'green', Y: 'yellow' }[c] || 'gray');
+        
+        function setupGameBoard(state) {
+            const trackHeader = dom.racetrackPanel.querySelector('.track-header');
+            trackHeader.innerHTML = '<div></div>';
+            for (let i = 0; i <= FINISH_LINE; i++) {
+                const headerCell = document.createElement('div');
+                headerCell.className = 'header-cell';
+                headerCell.id = `header-cell-${i}`;
+                headerCell.textContent = i === 0 ? 'Start' : (i === FINISH_LINE ? '🏁' : i);
+                trackHeader.appendChild(headerCell);
+            }
+            
+            dom.lanesContainer.innerHTML = '';
+            carElements = {};
+            state.players.forEach(p => {
+                const i = p.id;
+                const lane = document.createElement('div');
+                lane.className = 'track-lane';
+                lane.id = `lane-${i}`;
+                const info = document.createElement('div');
+                info.className = 'player-lane-info';
+                info.innerHTML = `<span id="player-name-${i}" class="player-name-plate"></span><span id="player-choice-indicator-${i}" class="player-choice-indicator"></span>`;
+                lane.appendChild(info);
+                for (let j = 0; j <= FINISH_LINE; j++) {
+                    const cell = document.createElement('div');
+                    cell.className = `track-cell ${j === FINISH_LINE ? 'finish' : ''}`;
+                    cell.id = `cell-${i}-${j}`;
+                    lane.appendChild(cell);
+                }
+                dom.lanesContainer.appendChild(lane);
+                const car = document.createElement('div');
+                car.id = `car-${i}`;
+                car.className = `car player-${i}`;
+                car.textContent = i;
+                dom.lanesContainer.appendChild(car);
+                carElements[i] = car;
+            });
+        }
+
+        function clearMovementVisuals() {
+            document.querySelectorAll('.move-forward, .move-backward').forEach(cell => {
+                cell.classList.remove('move-forward', 'move-backward');
+            });
+        }
+
+        function hidePlayerChoices() {
+            document.querySelectorAll('.choice-display').forEach(div => div.remove());
+        }
+        
+        function updateUI(state) {
+            const oldPhase = currentGameState.gamePhase;
+            currentGameState = state;
+
+            if (!document.getElementById(`lane-${state.players[0].id}`)) {
+                setupGameBoard(state);
+            }
+
+            if (state.gamePhase === 'CHOOSING' && oldPhase !== 'CHOOSING') {
+                clearMovementVisuals();
+                hidePlayerChoices();
+            }
+
+            state.players.forEach(p => {
+                const carEl = carElements[p.id];
+                if (carEl) {
+                    carEl.classList.toggle('my-car', p.socketId === socket.id);
+                    const cellEl = document.getElementById(`cell-${p.id}-${p.position}`);
+                    if (cellEl) {
+                        const carSize = carEl.offsetWidth;
+                        const targetX = cellEl.offsetLeft + (cellEl.offsetWidth / 2) - (carSize / 2);
+                        const targetY = cellEl.offsetTop + (cellEl.offsetHeight / 2) - (carSize / 2);
+                        carEl.style.transform = `translate(${targetX}px, ${targetY}px)`;
+                    }
+                }
+                const namePlate = document.getElementById(`player-name-${p.id}`);
+                if (namePlate) namePlate.textContent = p.name || `Player ${p.id}`;
+
+                const choiceIndicator = document.getElementById(`player-choice-indicator-${p.id}`);
+                if (choiceIndicator) {
+                    namePlate.classList.remove('is-my-turn');
+                    if (state.gamePhase === 'CHOOSING' && !p.isFinished && p.isConnected) {
+                        choiceIndicator.textContent = p.choice ? 'Đã chọn ✔' : 'Đang chọn...';
+                        if (p.socketId === socket.id && !p.choice) {
+                           namePlate.classList.add('is-my-turn');
+                        }
+                    } else {
+                        choiceIndicator.textContent = '';
+                    }
+                }
+            });
+
+            dom.turnCounter.textContent = state.turn;
+            
+            dom.gmColorContainer.innerHTML = '';
+            const gmCards = state.gmChoices || [];
+            
+            if (gmCards.length > 0) {
+                const isChoosing = state.gamePhase === 'CHOOSING';
+                gmCards.forEach((choice, index) => {
+                    const shouldShowColor = !isChoosing || index === 0;
+                    const el = document.createElement('span');
+                    const size = gmCards.length > 2 ? 'w-7 h-7' : 'w-8 h-8';
+                    el.className = `${size} inline-block rounded-full border-2 align-middle shadow-md transition-all flex items-center justify-center font-bold`;
+                    
+                    if (shouldShowColor) {
+                        el.classList.add(`bg-${getColorClass(choice)}-500`, 'border-slate-400');
+                    } else {
+                        el.classList.add('bg-slate-600', 'border-slate-500', 'text-slate-400');
+                        el.textContent = '?';
+                    }
+                    dom.gmColorContainer.appendChild(el);
+                });
+            } else {
+                 dom.gmColorContainer.innerHTML = '<span class="w-10 h-10 inline-block rounded-full border-2 border-white align-middle shadow-lg flex items-center justify-center">?</span>';
+            }
+
+            dom.priorityColorSpan.className = 'w-10 h-10 mt-1 inline-block rounded-full border-2 border-white align-middle shadow-lg transition-all';
+            dom.priorityColorSpan.textContent = '?';
+            if (state.priorityColor) {
+                 dom.priorityColorSpan.classList.add(`bg-${getColorClass(state.priorityColor)}-500`);
+                 dom.priorityColorSpan.textContent = '';
+            }
+
+            const { highestPlayerCannotMove, lowestPlayerBonusMove, allMovesMinusOne } = state.specialNextTurnEffects;
+            let effectHTML = '<span class="text-slate-500 italic">Không có hiệu ứng</span>';
+            if (highestPlayerCannotMove) effectHTML = `<div class="info-tag bg-red-500 text-white">HIỆU ỨNG: CHẶN TOP 1</div>`;
+            if (lowestPlayerBonusMove) effectHTML = `<div class="info-tag bg-green-500 text-white">HIỆU ỨNG: THƯỞNG ĐÁY BẢNG</div>`;
+            if (allMovesMinusOne) effectHTML = `<div class="info-tag bg-yellow-500 text-slate-800">HIỆU ỨNG: DI CHUYỂN -1</div>`;
+            dom.specialEffectDisplay.innerHTML = effectHTML;
+
+            if(state.lastLog) {
+                dom.statusTag.textContent = state.lastLog.tag;
+                dom.statusTag.className = `status-tag py-1 px-2.5 rounded mr-3 flex-shrink-0 text-sm ${state.lastLog.tagBg} text-white`;
+                dom.statusMessage.innerHTML = state.lastLog.message;
+            }
+
+            const me = state.players.find(p => p.socketId === socket.id);
+            if(me) {
+                const canChoose = state.gamePhase === 'CHOOSING' && !me.isFinished && !me.choice;
+                ['R', 'G', 'Y'].forEach(c => dom.cardButtons[c].disabled = !(canChoose && me.lastPlayed !== c));
+                dom.cardButtons['W'].disabled = !(canChoose && me.hasWhiteCard);
+                dom.removeGmButton.disabled = !(canChoose && me.canUseRemoveGm);
+            }
+            
+            updateRankingBoard(state);
+            updateColorCountsUI(state.colorCounts, state.gamePhase);
+            highlightLeaderColumn(state);
+        }
+        
+        function updateRankingBoard(state) {
+            dom.rankingList.innerHTML = '';
+            const sortedPlayers = [...state.players].filter(p => p.isConnected).sort((a, b) => {
+                if (a.isFinished && !b.isFinished) return -1;
+                if (!a.isFinished && b.isFinished) return 1;
+                if (a.isFinished && b.isFinished) return a.finishTurn - b.finishTurn;
+                return b.position - a.position;
+            });
+            
+            sortedPlayers.forEach((p, index) => {
+                 const rank = index + 1;
+                 const rankColor = rank === 1 ? 'text-amber-400' : (rank === 2 ? 'text-slate-300' : 'text-slate-400');
+                 const playerEl = document.createElement('div');
+                 playerEl.className = `flex items-center bg-slate-800/50 p-1.5 rounded-md transition-all ${p.isFinished ? 'opacity-60' : ''} ${p.socketId === socket.id ? 'border border-amber-400' : ''}`;
+                 let positionOrFinish = p.isFinished ? `<div class="text-xs text-center text-green-400">Lượt ${p.finishTurn}<br>🏁</div>` : `<div class="font-bold text-base">${p.position}</div>`;
+                 playerEl.innerHTML = `<div class="w-6 text-center"><span class="font-bold text-sm ${rankColor}">#${rank}</span></div><div class="player-avatar w-7 h-7 rounded-full player-${p.id} flex items-center justify-center font-bold text-xs border-2 border-slate-600 flex-shrink-0">${p.id}</div><div class="flex-grow px-2"><p class="font-bold text-sm">${p.name}</p></div><div class="text-right w-12 text-center flex-shrink-0">${positionOrFinish}</div>`;
+                dom.rankingList.appendChild(playerEl);
+            });
+        }
+        
+        function updateColorCountsUI(counts, gamePhase) {
+            dom.colorCountsDisplay.innerHTML = '';
+            if(!counts) return;
+            const shouldAnimate = gamePhase === 'REVEAL';
+            ['R', 'G', 'Y'].forEach(color => {
+                if (counts[color] > 0) {
+                    const tag = document.createElement('div');
+                    tag.className = `info-tag py-1 px-2 rounded-md text-white bg-${getColorClass(color)}-500 ${shouldAnimate ? 'animate' : ''}`;
+                    tag.innerHTML = `${{ R: 'Đỏ', G: 'Xanh', Y: 'Vàng'}[color]} &times; ${counts[color]}`;
+                    dom.colorCountsDisplay.appendChild(tag);
+                }
+            });
+        }
+        
+        function highlightLeaderColumn(state) {
+            document.querySelectorAll('.header-cell').forEach(c => c.classList.remove('leading-column'));
+            const activePlayers = state.players.filter(p => p.isConnected && !p.isFinished);
+            if (activePlayers.length > 0) {
+                const maxPos = Math.max(...activePlayers.map(p => p.position));
+                const headerCell = document.getElementById(`header-cell-${maxPos}`);
+                if(headerCell) headerCell.classList.add('leading-column');
+            }
+        }
+
+        function visualizeMovements(movements) {
+            clearMovementVisuals();
+            if (!movements) return;
+            Object.entries(movements).forEach(([id, data]) => {
+                const className = data.move > 0 ? 'move-forward' : 'move-backward';
+                for (let i = data.start; i <= data.end; i++) {
+                     if ((i === data.finalPos && data.move > 0) || (i === data.prevPos && data.move < 0)) continue;
+                    const cell = document.getElementById(`cell-${id}-${i}`);
+                    if (cell) cell.classList.add(className);
+                }
+            });
+        }
+        
+        function displayPlayerChoices(players) {
+            hidePlayerChoices(); // Clear old choices first
+            players.forEach(p => {
+                if (!p.isFinished && p.choice) {
+                    const carEl = document.getElementById(`car-${p.id}`);
+                    if (!carEl) return;
+                    const choiceDiv = document.createElement('div');
+                    choiceDiv.className = `choice-display bg-${getColorClass(p.choice)}-500 ${p.choice === 'W' || p.choice === 'Y' ? 'text-black' : 'text-white'}`;
+                    choiceDiv.textContent = p.choice;
+                    dom.lanesContainer.appendChild(choiceDiv);
+                    const style = window.getComputedStyle(carEl);
+                    const matrix = new DOMMatrixReadOnly(style.transform);
+                    choiceDiv.style.transform = `translate(${matrix.e + 4}px, ${matrix.f - 35}px)`;
+                }
+            });
+        }
+
+        function goToLobby() {
+            dom.gameScreen.style.display = 'none';
+            dom.lobbyScreen.style.display = 'flex';
+            dom.gameOverModal.classList.add('hidden');
+            dom.lanesContainer.innerHTML = '';
+            socket.disconnect();
+        }
+
+        function setupEventListeners() {
+            function connectAndJoin(action, payload) {
+                const playerName = dom.playerNameInput.value.trim();
+                if (!playerName) {
+                    dom.lobbyError.textContent = 'Vui lòng nhập tên của bạn.';
+                    return;
+                }
+                socket.auth = { name: playerName };
+                socket.connect();
+                socket.emit(action, payload);
+            }
+
+            dom.createRoomBtn.addEventListener('click', () => connectAndJoin('createRoom'));
+            dom.joinRoomBtn.addEventListener('click', () => {
+                const roomId = dom.roomIdInput.value.trim().toUpperCase();
+                if (roomId) connectAndJoin('joinRoom', roomId);
+            });
+
+            dom.leaveRoomBtn.addEventListener('click', () => {
+                socket.emit('leaveRoom');
+                goToLobby();
+            });
+
+            dom.backToLobbyBtn.addEventListener('click', goToLobby);
+            
+            dom.currentStatusBar.addEventListener('click', () => {
+                dom.logHistoryContent.innerHTML = '';
+                currentGameState.logHistory.slice().reverse().forEach(log => {
+                    const msgEl = document.createElement('div');
+                    msgEl.className = `p-1.5 ${log.colorClass} flex items-start gap-2 border-b border-slate-700/50 text-sm`;
+                    msgEl.innerHTML = `<span class="py-0.5 px-1.5 rounded text-xs text-white/90 ${log.tagBg}">${log.tag}</span><div class="flex-grow">${log.message}</div>`;
+                    dom.logHistoryContent.appendChild(msgEl);
+                });
+                dom.logHistoryModal.classList.remove('hidden');
+            });
+            dom.closeLogModal.addEventListener('click', () => {
+                dom.logHistoryModal.classList.add('hidden');
+            });
+
+            Object.keys(dom.cardButtons).forEach(key => {
+                 dom.cardButtons[key].addEventListener('click', () => socket.emit('playerAction', { type: 'CHOOSE_CARD', card: key }));
+            });
+            dom.removeGmButton.addEventListener('click', () => dom.removeGmModal.classList.remove('hidden'));
+            dom.confirmRemoveGmYes.addEventListener('click', () => {
+                dom.removeGmModal.classList.add('hidden');
+                socket.emit('playerAction', { type: 'USE_POWER' });
+            });
+            dom.confirmRemoveGmNo.addEventListener('click', () => dom.removeGmModal.classList.add('hidden'));
+            dom.reselectOptions.querySelectorAll('button').forEach(button => {
+                button.addEventListener('click', () => {
+                    socket.emit('playerAction', { type: 'RESELECT_CARD', card: button.dataset.color });
+                    dom.reselectModal.classList.add('hidden');
+                });
+            });
+            dom.roomInfoBar.addEventListener('click', () => {
+                navigator.clipboard.writeText(dom.roomIdDisplay.textContent).then(() => {
+                    const originalText = dom.roomInfoBar.innerHTML;
+                    dom.roomInfoBar.innerHTML = '<span class="text-green-400">Đã sao chép!</span>';
+                    setTimeout(() => { dom.roomInfoBar.innerHTML = originalText; }, 1500);
+                });
+            });
+        }
+
+        function setupSocketListeners() {
+            socket.on('connect_error', (err) => {
+                 dom.lobbyError.textContent = err.message;
+            });
+            socket.on('roomJoined', (data) => {
+                dom.roomIdDisplay.textContent = data.roomId;
+                dom.lobbyScreen.style.display = 'none';
+                dom.gameScreen.style.display = 'block';
+                dom.lobbyError.textContent = '';
+                updateUI(data.gameState);
+            });
+            socket.on('gameStateUpdate', (state) => {
+                updateUI(state);
+            });
+            // --- FIX: Re-add dedicated listeners for visual events ---
+            socket.on('showChoices', (players) => displayPlayerChoices(players));
+            socket.on('visualizeMovements', (movements) => visualizeMovements(movements));
+            
+            socket.on('forceReselect', () => dom.reselectModal.classList.remove('hidden'));
+            socket.on('gameOver', (finalState) => {
+                updateUI(finalState);
+                dom.modalRanking.innerHTML = dom.rankingList.innerHTML;
+                dom.gameOverModal.classList.remove('hidden');
+            });
+            socket.on('error', (message) => {
+                if(dom.lobbyScreen.style.display !== 'none') {
+                    dom.lobbyError.textContent = message;
+                }
+                goToLobby();
+            });
+        }
+
+        window.onload = () => {
+            cacheDOMElements();
+            setupEventListeners();
+            setupSocketListeners();
+        };
+    </script>
+</body>
+</html>
