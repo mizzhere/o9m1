@@ -1,15 +1,15 @@
 /*
     FILE: server.js (Server-Side)
     UPDATE:
-    - Thêm cơ chế xác thực người dùng bằng userId (token).
-    - Người dùng mới sẽ được cấp userId, người dùng cũ sẽ được nhận dạng qua userId đã lưu.
-    - Logic tạo/vào/rời phòng giờ đây dựa trên userId.
+    - Sửa lỗi đa tab: Giờ đây hệ thống có thể quản lý nhiều kết nối (tab) cho một người dùng.
+    - Phòng chơi sẽ chỉ bị ảnh hưởng khi người dùng đóng tab cuối cùng.
+    - Xác thực và logic game được dựa trên userId ổn định, không phải socketId tạm thời.
 */
 const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
 const path = require('path');
-const crypto = require('crypto'); // Sử dụng để tạo userId
+const crypto = require('crypto');
 
 const app = express();
 const server = http.createServer(app);
@@ -28,6 +28,7 @@ app.get('/', (req, res) => {
 const gameRooms = {};
 const users = {}; // Lưu { userId: name }
 const socketIdToUserId = {}; // Lưu { socketId: userId }
+const userConnections = {}; // Lưu { userId: Set<socketId> }
 
 // --- HELPER FUNCTIONS ---
 const sleep = ms => new Promise(res => setTimeout(res, ms));
@@ -54,8 +55,7 @@ function createNewGameState(roomId) {
     };
 }
 
-function getRoomBySocketId(socketId) {
-    const userId = socketIdToUserId[socketId];
+function getRoomByUserId(userId) {
     if (!userId) return null;
     return Object.values(gameRooms).find(room => room.players.some(p => p.userId === userId));
 }
@@ -70,24 +70,19 @@ function logAndEmit(roomId, tag, message, options = {}) {
     io.to(roomId).emit('gameStateUpdate', state);
 }
 
-function handlePlayerLeave(socket) {
-    const userId = socketIdToUserId[socket.id];
-    if (!userId) return;
-
-    const room = Object.values(gameRooms).find(r => r.players.some(p => p.userId === userId));
+function markPlayerAsDisconnected(userId) {
+    const room = getRoomByUserId(userId);
     if (room) {
         const player = room.players.find(p => p.userId === userId);
         if (player) {
+            player.isConnected = false;
             if (room.gamePhase === 'WAITING') {
                 room.players = room.players.filter(p => p.userId !== userId);
                 room.players.forEach((p, index) => { p.id = index; });
-            } else {
-                player.isConnected = false;
             }
             
-            socket.leave(room.roomId);
-            logAndEmit(room.roomId, 'Rời phòng', `<b>${player.name}</b> đã rời phòng.`, { tagBg: 'bg-red-500' });
-            
+            logAndEmit(room.roomId, 'Mất kết nối', `<b>${player.name}</b> đã mất kết nối.`, { tagBg: 'bg-red-500' });
+
             if (room.players.filter(p => p.isConnected).length === 0) {
                 delete gameRooms[room.roomId];
             }
@@ -96,11 +91,9 @@ function handlePlayerLeave(socket) {
             io.emit('updateRoomList', getLobbyInfo());
         }
     }
-    delete socketIdToUserId[socket.id];
 }
 
 // --- CORE GAME LOGIC (Không thay đổi) ---
-// ... (Các hàm game logic giữ nguyên, không cần thay đổi)
 async function startTurn(roomId) {
     const state = gameRooms[roomId];
     if (!state || state.gamePhase === 'GAMEOVER') return;
@@ -354,6 +347,11 @@ io.on('connection', (socket) => {
         }
 
         socketIdToUserId[socket.id] = userId;
+        if (!userConnections[userId]) {
+            userConnections[userId] = new Set();
+        }
+        userConnections[userId].add(socket.id);
+        
         socket.emit('authenticated', { userId, name });
         socket.emit('updateRoomList', getLobbyInfo());
     });
@@ -372,7 +370,7 @@ io.on('connection', (socket) => {
         gameRooms[roomId] = createNewGameState(roomId);
         const state = gameRooms[roomId];
         const newPlayer = {
-            id: 0, userId, name: users[userId], socketId: socket.id, isConnected: true,
+            id: 0, userId, name: users[userId], isConnected: true,
             position: 0, prevPosition: 0, hasWhiteCard: true, canUseRemoveGm: true,
             lastPlayed: null, choice: null, isFinished: false, finishTurn: null,
         };
@@ -392,7 +390,6 @@ io.on('connection', (socket) => {
         
         const rejoinSlot = room.players.find(p => p.userId === userId);
         if (rejoinSlot) {
-            rejoinSlot.socketId = socket.id;
             rejoinSlot.isConnected = true;
             socket.join(roomId);
             socket.emit('roomJoined', { roomId, gameState: room });
@@ -405,7 +402,7 @@ io.on('connection', (socket) => {
         if (room.players.length >= NUM_PLAYERS_REQUIRED) return socket.emit('error', 'Phòng đã đầy.');
         
         const newPlayer = {
-            id: room.players.length, userId, name: users[userId], socketId: socket.id, isConnected: true,
+            id: room.players.length, userId, name: users[userId], isConnected: true,
             position: 0, prevPosition: 0, hasWhiteCard: true, canUseRemoveGm: true,
             lastPlayed: null, choice: null, isFinished: false, finishTurn: null,
         };
@@ -423,9 +420,13 @@ io.on('connection', (socket) => {
     });
 
     socket.on('playerAction', async (action) => {
-        const room = getRoomBySocketId(socket.id);
+        const userId = socketIdToUserId[socket.id];
+        if (!userId) return;
+        
+        const room = getRoomByUserId(userId);
         if (!room) return;
-        const player = room.players.find(p => p.socketId === socket.id);
+        
+        const player = room.players.find(p => p.userId === userId);
         if (!player || room.gamePhase !== 'CHOOSING' || player.choice) return;
 
         if (action.type === 'CHOOSE_CARD') { player.choice = action.card; } 
@@ -443,7 +444,6 @@ io.on('connection', (socket) => {
 
         if (allChosen) {
              if (room.players.some(p => p.choice === 'W' && room.removeGmUsedThisTurn)) {
-                // Tạm thời để proceedWithResolution xử lý, sẽ cần xem lại logic này
                 await proceedWithResolution(room.roomId);
              } else {
                 await proceedWithResolution(room.roomId);
@@ -451,8 +451,29 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('leaveRoom', () => { handlePlayerLeave(socket); });
-    socket.on('disconnect', () => { handlePlayerLeave(socket); });
+    socket.on('leaveRoom', () => { 
+        const userId = socketIdToUserId[socket.id];
+        const room = getRoomByUserId(userId);
+        if (room) {
+            socket.leave(room.roomId);
+            markPlayerAsDisconnected(userId);
+        }
+    });
+
+    socket.on('disconnect', () => { 
+        console.log(`Socket disconnected: ${socket.id}`);
+        const userId = socketIdToUserId[socket.id];
+        if (userId) {
+            userConnections[userId].delete(socket.id);
+            // Chỉ xử lý ngắt kết nối khỏi game nếu đây là tab cuối cùng
+            if (userConnections[userId].size === 0) {
+                console.log(`User ${users[userId]} fully disconnected.`);
+                markPlayerAsDisconnected(userId);
+                delete userConnections[userId];
+            }
+        }
+        delete socketIdToUserId[socket.id];
+    });
 });
 
 server.listen(PORT, () => {
